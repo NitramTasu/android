@@ -27,15 +27,13 @@ import com.google.android.gms.maps.CameraUpdateFactory;
 import com.google.android.gms.maps.GoogleMap;
 import com.google.android.gms.maps.OnMapReadyCallback;
 import com.google.android.gms.maps.SupportMapFragment;
-import com.google.android.gms.maps.model.BitmapDescriptorFactory;
 import com.google.android.gms.maps.model.LatLng;
 import com.google.android.gms.maps.model.LatLngBounds;
-import com.google.android.gms.maps.model.MarkerOptions;
-import com.google.android.gms.maps.model.Polyline;
 import com.google.android.gms.maps.model.PolylineOptions;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.google.gson.internal.bind.DateTypeAdapter;
+import com.jakewharton.rxbinding.widget.RxTextView;
+import com.jakewharton.rxbinding.widget.TextViewTextChangeEvent;
 import com.tormentaLabs.riobus.adapter.BusInfoWindowAdapter;
 import com.tormentaLabs.riobus.asyncTasks.BusSearchTask;
 import com.tormentaLabs.riobus.common.BusDataReceptor;
@@ -49,15 +47,19 @@ import com.tormentaLabs.riobus.model.Spot;
 import com.tormentaLabs.riobus.service.HttpService;
 
 import java.util.ArrayList;
-import java.util.Date;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.TimeUnit;
 
-import retrofit.Callback;
 import retrofit.RestAdapter;
-import retrofit.RetrofitError;
-import retrofit.client.Response;
 import retrofit.converter.GsonConverter;
+import rx.Observable;
+import rx.Subscription;
+import rx.android.schedulers.AndroidSchedulers;
+import rx.functions.Action1;
+import rx.functions.Func1;
+import rx.schedulers.Schedulers;
+
 
 public class MainActivity extends AppCompatActivity implements OnMapReadyCallback, BusDataReceptor,
         GoogleApiClient.ConnectionCallbacks,
@@ -66,16 +68,24 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private AutoCompleteTextView search;
     private ImageButton info;
 
+
+    ArrayAdapter arrayAdapter;
+    String[] lines;
+
     Location currentLocation;
 
     MapMarker mapMarker;
     private GoogleMap map;
     private GoogleApiClient mGoogleApiClient;
 
+    private Subscription _subcription;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.mapa);
+
+
 
         buildGoogleApiClient();
         setupSearch();
@@ -128,6 +138,8 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
     private void setupSearch() {
 
         search = (AutoCompleteTextView) findViewById(R.id.search);
+
+
         //Quando o usuario digita enter, ele faz a requisição procurando a posição daquela linha
         search.setOnKeyListener(new View.OnKeyListener() {
             @Override
@@ -155,6 +167,80 @@ public class MainActivity extends AppCompatActivity implements OnMapReadyCallbac
                 return false;
             }
         });
+
+        defineSearchObservable();
+
+
+
+    }
+
+    private void defineSearchObservable() {
+        final HttpService serviceApi;
+
+        Gson gson = new GsonBuilder()
+                .setDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
+                .create();
+
+        RestAdapter restAdapter = new RestAdapter.Builder()
+                .setEndpoint(EnvironmentConfig.URL_ENDPOINT)
+                .setConverter(new GsonConverter(gson))
+                .build();
+
+
+        serviceApi = restAdapter.create(HttpService.class);
+
+        Action1 subscriberOk = new Action1<Observable<List<Bus>>>() {
+            @Override
+            public void call(Observable<List<Bus>> observableBuses) {
+                Log.i("Rx", "Entrou ");
+
+                observableBuses.subscribeOn(Schedulers.io())
+                            .observeOn(AndroidSchedulers.mainThread())
+                            .subscribe(new Action1<List<Bus>>() {
+                                @Override
+                                public void call(List<Bus> buses) {
+                                    lines = new String[buses.size()];
+                                    int cont = 0;
+                                    for (Bus bus:buses ) {
+                                        //Log.i("Teste","teste "+bus.getLine());
+
+                                        lines[cont] = bus.getLine();
+
+                                        cont++;
+                                    }
+
+                                    arrayAdapter = new ArrayAdapter(MainActivity.this, android.R.layout.simple_list_item_1,lines );
+
+                                    search.setAdapter(arrayAdapter);
+                                }
+                            });
+            }
+        };
+
+        Action1 subscriberError = new Action1<Throwable>() {
+            @Override
+            public void call(Throwable throwable) {
+                // Handle Error
+                throwable.printStackTrace();
+            }
+        };
+
+        RxTextView.textChangeEvents(search)
+                .debounce(400, TimeUnit.MILLISECONDS)
+                .observeOn(AndroidSchedulers.mainThread())
+                .filter(new Func1<TextViewTextChangeEvent, Boolean>() {
+                    @Override
+                    public Boolean call(TextViewTextChangeEvent textViewTextChangeEvent) {
+                        return textViewTextChangeEvent.view().getText().length() > 2;
+                    }
+                })
+                .map(new Func1<TextViewTextChangeEvent, Observable<List<Bus>>>() {
+                    @Override
+                    public Observable<List<Bus>> call(TextViewTextChangeEvent textViewTextChangeEvent) {
+                        return  serviceApi.getPageObservable(textViewTextChangeEvent.view().getText().toString());
+                    }
+                })
+                .subscribe(subscriberOk,subscriberError);
     }
 
     private void setupMap() {

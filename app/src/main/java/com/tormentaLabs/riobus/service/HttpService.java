@@ -10,6 +10,7 @@ import retrofit.http.GET;
 import retrofit.http.Headers;
 import retrofit.http.Path;
 import retrofit.http.Query;
+import rx.Observable;
 
 /**
  * Created by Pedro on 7/14/15.
@@ -31,6 +32,9 @@ public interface HttpService {
     })
     @GET("/v3/search/{lines}")
     List<Bus> getPage(@Path("lines")String lines);
+
+    @GET("/v3/search/{lines}")
+    Observable<List<Bus>> getPageObservable(@Path("lines") String lines);
 
 
     @Headers({
